@@ -1,0 +1,83 @@
+---
+title: "code_MOHAMMAD_FAIZ_FAM69"
+author: "Faiz Mohammad"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#load required packages
+library(randomForest)
+library(knitr)
+
+#load data
+train.data =read.csv("df_train.csv")
+test.data =read.csv("df_test-1.csv")
+
+#randomForest requires test data to have exact same categorical levels
+#as training data we temporarily combine them to align factor levels
+
+test.ids = test.data$ID
+test.data$ID = NULL
+test.data$price = 0
+
+all.data = rbind(train.data, test.data)
+cat.vars= c("neighbourhood_cleansed", "room_type", "host_is_superhost", 
+              "instant_bookable", "host_identity_verified")
+
+all.data[cat.vars] = lapply(all.data[cat.vars], as.factor)
+
+train.data = all.data[1:nrow(train.data),]
+test.data = all.data[(nrow(train.data)+1):nrow(all.data),]
+test.data$price = NULL
+
+#handle outliers (target variable is heavily right skewed due to extreme outliers: $5,556).
+train.cleaned = train.data[train.data$price<=1000,]
+
+#now model extrapolation bagging v. random forest
+set.seed(123)
+
+#Model 1: Bagging (m=p) 
+bag.model = randomForest(price~., data = train.cleaned, mtry =16, importance = TRUE, ntree = 500)
+
+#Model 2: Random forest (m =approx(p/3))
+rf.model = randomForest(price~., data = train.cleaned, mtry =5, importance = TRUE, ntree = 500)
+
+#Figure 1:Histogram of Prices (before cleaning)
+hist(train.data$price,main = "Figure 1. Distribution of MSP Airbnb Nightly Prices", xlab = "Price (in USD)", col = "maroon")
+
+#Table 1: Data Analysis Summary
+eda.summary= summary(train.data[c("price", "accommodates", "bathrooms","dist_to_downtown")])
+kable(eda.summary, caption = "Table 1: Exploratory Data Analysis Summary" )
+
+#Table 2:Model Comparison (Bagging v. Random forest)
+model.comparison= data.frame(Model = c("Bagging", "Random Forest"), Num_Variables_Tried_At_Split=c(16,5),
+  Out_Of_Bag_MSE = c(tail(bag.model$mse, 1), tail(rf.model$mse, 1))
+)
+kable(model.comparison,caption = "Table 2: Model Comparison Bagging v. Random Forest")
+
+#Figure 2: Variable Importance Plot(%IncMSE)
+par(mar= c(5,15,6,2))
+varImpPlot(rf.model, type = 1, main="", cex=.85)
+title(main = "Figure 2: Variable Permutation Importance (%IncMSE)", 
+      line = 1.5, cex.main = 1.1)
+
+#Compare Out of Bag MSE
+print(paste("Bagging OOB MSE:", tail(bag.model$mse,1)))
+print(paste("Random Forest OOB MSE:", tail(rf.model$mse,1)))
+#We see that Random Forest OOB MSE is less than Bagging OOB MSE
+
+#Extract the permutation variable importance 
+varImpPlot(rf.model, type = 1, main="Out of Bag Permutation Importance")
+
+# Generate predictions for the test dataset
+yhat.rf= predict(rf.model, newdata = test.data)
+
+submission= data.frame(id = test.ids, price =yhat.rf)
+file.name = "testing_predictions_MOHAMMAD_FAIZ_FAM69.csv"
+write.csv(submission, file.name, row.names = FALSE)
+
+
+```
